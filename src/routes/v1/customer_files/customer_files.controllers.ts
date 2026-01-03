@@ -1,0 +1,836 @@
+import fs from "fs";
+import path from "path";
+import { getImageUrl } from "../../../utils/baseurl";
+import { FileService } from "../../../utils/fileService";
+
+// -----------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------
+const getFileType = (filename: string): string => {
+  const ext = path.extname(filename).toLowerCase();
+  return ext.startsWith(".") ? ext.slice(1) : ext;
+};
+
+const addFileEntry = (entries, row, field, table, rowId, createdAt) => {
+  const url = row[field];
+  if (url && typeof url === "string") {
+    entries.push({
+      fieldName: field,
+      table,
+      url,
+      id: rowId,
+      fileType: getFileType(url),
+      createdAt,
+    });
+  }
+};
+
+export const createCustomerFile = async (request, reply) => {
+  const files = request.files as any;
+  const prisma = request.server.prisma;
+
+  const cleanupFiles = () => {
+    if (!files) return;
+    Object.keys(files).forEach((key) => {
+      files[key].forEach((file: any) => {
+        FileService.removeFileByPath(file.path);
+      });
+    });
+  };
+
+  try {
+    const { customerId } = request.params;
+
+    if (!customerId) {
+      cleanupFiles();
+      return reply.status(400).send({
+        success: false,
+        message: "customerId is required",
+      });
+    }
+
+    // Check if customer exists
+    const customer = await prisma.customers.findUnique({
+      where: { id: customerId },
+    });
+
+    if (!customer) {
+      cleanupFiles();
+      return reply.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    // Check if file is uploaded
+    if (!files || !files.image || !files.image[0]) {
+      cleanupFiles();
+      return reply.status(400).send({
+        success: false,
+        message:
+          "File is required. Please upload a file with field name 'image'",
+      });
+    }
+
+    const uploadedFile = files.image[0];
+    const filename = uploadedFile.filename;
+
+    // Create customer file record
+    const customerFile = await prisma.customer_files.create({
+      data: {
+        customerId,
+        url: filename,
+      },
+    });
+
+    // Helper to get file extension
+    const getFileType = (filename: string) => {
+      const ext = path.extname(filename).toLowerCase();
+      return ext.startsWith(".") ? ext.slice(1) : ext;
+    };
+
+    const fileType = getFileType(filename);
+
+    const formattedEntry = {
+      fieldName: "image",
+      table: "customer_files",
+      url: filename,
+      fullUrl: getImageUrl(filename),
+      id: customerFile.id,
+      fileType,
+    };
+
+    reply.status(201).json({
+      success: true,
+      message: "Customer file created successfully",
+      data: formattedEntry,
+    });
+  } catch (error: any) {
+    console.error("Create Customer File Error:", error);
+    cleanupFiles();
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+
+export const getCustomerFiles = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const customerId = request.query.id as string;
+    const table = (request.query.table as string) || "all";
+
+    if (!customerId) {
+      return reply.status(400).send({
+        success: false,
+        message: "customerId is required in query params",
+      });
+    }
+
+    const page = parseInt(request.query.page as string, 10) || 1;
+    const limit = parseInt(request.query.limit as string, 10) || 20;
+
+    const skip = (page - 1) * limit;
+
+    // Check if customer exists
+    const customer = await prisma.customers.findUnique({
+      where: { id: customerId },
+    });
+
+    if (!customer) {
+      return reply.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    let screenerRows = [];
+    let customShaftRows = [];
+    let customerFilesRows = [];
+    let barcodeRows = [];
+    let invoiceRows = [];
+
+    if (table === "all" || table === "screener_file") {
+      screenerRows = await prisma.screener_file.findMany({
+        where: { customerId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          createdAt: true,
+          picture_10: true,
+          picture_23: true,
+          threed_model_left: true,
+          picture_17: true,
+          picture_11: true,
+          picture_24: true,
+          threed_model_right: true,
+          picture_16: true,
+          csvFile: true,
+        },
+      });
+    }
+
+    if (table === "all" || table === "custom_shafts") {
+      customShaftRows = await prisma.custom_shafts.findMany({
+        where: { customerId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          createdAt: true,
+          image3d_1: true,
+          image3d_2: true,
+        },
+      });
+    }
+
+    if (table === "all" || table === "customer_files") {
+      customerFilesRows = await prisma.customer_files.findMany({
+        where: { customerId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          createdAt: true,
+          url: true,
+        },
+      });
+    }
+
+    if (table === "all" || table === "barcode") {
+      barcodeRows = await prisma.customerOrders.findMany({
+        where: { customerId, barcodeLabel: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          createdAt: true,
+          barcodeLabel: true,
+          orderNumber: true,
+          fertigstellungBis: true,
+          customer: {
+            select: {
+              vorname: true,
+              nachname: true,
+            },
+          },
+        },
+      });
+    }
+
+    if (table === "all" || table === "insoelInvoice") {
+      invoiceRows = await prisma.customerOrders.findMany({
+        where: { customerId, invoice: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          createdAt: true,
+          invoice: true,
+          orderNumber: true,
+          fertigstellungBis: true,
+          customer: {
+            select: {
+              vorname: true,
+              nachname: true,
+            },
+          },
+        },
+      });
+    }
+
+    // Build final output
+    const allEntries: any[] = [];
+
+    // Screener File
+    for (const row of screenerRows) {
+      const fields = [
+        "picture_10",
+        "picture_23",
+        "threed_model_left",
+        "picture_17",
+        "picture_11",
+        "picture_24",
+        "threed_model_right",
+        "picture_16",
+        "csvFile",
+      ] as const;
+
+      for (const field of fields) {
+        if (row[field]) {
+          allEntries.push({
+            fieldName: field,
+            table: "screener_file",
+            url: row[field],
+            id: row.id,
+            fileType: getFileType(row[field]),
+            createdAt: row.createdAt,
+          });
+        }
+      }
+    }
+
+    // Admin Order (custom shaft)
+    for (const row of customShaftRows) {
+      const fields = ["image3d_1", "image3d_2"] as const;
+
+      for (const field of fields) {
+        if (row[field]) {
+          allEntries.push({
+            fieldName: field,
+            table: "custom_shafts",
+            url: row[field],
+            id: row.id,
+            fileType: getFileType(row[field]),
+            createdAt: row.createdAt,
+          });
+        }
+      }
+    }
+
+    // Customer File
+    for (const row of customerFilesRows) {
+      if (row.url) {
+        allEntries.push({
+          fieldName: "image",
+          table: "customer_files",
+          url: row.url,
+          id: row.id,
+          fileType: getFileType(row.url),
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Barcode (from customerOrders)
+    for (const row of barcodeRows) {
+      if (row.barcodeLabel) {
+        allEntries.push({
+          fieldName: "barcodeLabel",
+          table: "barcode",
+          url: row.barcodeLabel,
+          id: row.id,
+          fileType: getFileType(row.barcodeLabel),
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Invoice (from customerOrders)
+    for (const row of invoiceRows) {
+      if (row.invoice) {
+        allEntries.push({
+          fieldName: "invoice",
+          table: "insoelInvoice",
+          url: row.invoice,
+          id: row.id,
+          fileType: getFileType(row.invoice),
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Sort newest first
+    allEntries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    // Pagination
+    const total = allEntries.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedEntries = allEntries.slice(skip, skip + limit);
+
+    // Add full URL
+    const baseUrl =
+      process.env.APP_URL || request.protocol + "://" + request.get("host");
+
+    paginatedEntries.forEach((entry) => {
+      entry.fullUrl = `${baseUrl}/uploads/${entry.url}`;
+    });
+
+    // Build exclInfo from barcode or invoice orders
+    let exclInfo: any = {};
+    const allOrderRows = [...barcodeRows, ...invoiceRows];
+    
+    if (allOrderRows.length > 0) {
+      // Sort all orders by createdAt desc to get the most recent one
+      const sortedOrders = allOrderRows.sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+      );
+      const mostRecentOrder = sortedOrders[0];
+      
+      if (mostRecentOrder.customer) {
+        const customerName = [
+          mostRecentOrder.customer.vorname,
+          mostRecentOrder.customer.nachname,
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        exclInfo = {
+          name: customerName || null,
+          orderNumber: mostRecentOrder.orderNumber || null,
+          fertigstellungBis: mostRecentOrder.fertigstellungBis || null,
+        };
+      }
+    }
+
+    request.status(200).json({
+      success: true,
+      message: "Files fetched successfully",
+      data: paginatedEntries,
+      exclInfo,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Get Customer Files Error:", error);
+    request.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+
+// -----------------------------------------------------------------
+// Helper: Delete file from disk
+// -----------------------------------------------------------------
+const deleteFileFromDisk = (filename: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const filePath = path.join(UPLOADS_DIR, filename);
+    fs.unlink(filePath, (err) => {
+      if (err && err.code !== "ENOENT") {
+        console.error(`Failed to delete file: ${filePath}`, err);
+        return reject(err);
+      }
+      resolve();
+    });
+  });
+};
+
+// -----------------------------------------------------------------
+// Main Delete Controller
+// -----------------------------------------------------------------
+export const deleteCustomerFile = async (request, reply) => {
+    const prisma = request.server.prisma;
+  const { id, table, fieldName, url } = request.body;
+
+  if (!id || !table || !fieldName || !url) {
+    return reply.status(400).send({
+      success: false,
+      message: "id, table, fieldName, and url are required",
+    });
+  }
+
+  // Validate table
+  const allowedTables = [
+    "screener_file",
+    "custom_shafts",
+    "customer_files",
+  ] as const;
+  if (!allowedTables.includes(table as any)) {
+    return reply.status(400).send({
+      success: false,
+      message: `Invalid table. Allowed: ${allowedTables.join(", ")}`,
+    });
+  }
+
+  try {
+    let deleted = false;
+    let updated = false;
+
+    switch (table) {
+      case "customer_files":
+        const customerFile = await prisma.customer_files.findUnique({
+          where: { id },
+          select: { url: true },
+        });
+
+        if (!customerFile) {
+          return reply.status(404).json({
+            success: false,
+            message: "File record not found",
+          });
+        }
+
+        await prisma.customer_files.delete({ where: { id } });
+        await deleteFileFromDisk(url);
+        deleted = true;
+        break;
+
+      case "screener_file":
+        // Only null the specific field
+        const validScreenerFields = [
+          "picture_10",
+          "picture_23",
+          "threed_model_left",
+          "picture_17",
+          "picture_11",
+          "picture_24",
+          "threed_model_right",
+          "picture_16",
+          "csvFile",
+        ];
+
+        if (!validScreenerFields.includes(fieldName)) {
+          return reply.status(400).send({
+            success: false,
+            message: `Invalid field for screener_file: ${fieldName}`,
+          });
+        }
+
+        const screenerRow = await prisma.screener_file.findUnique({
+          where: { id },
+          select: { [fieldName]: true },
+        });
+
+        if (!screenerRow || !screenerRow[fieldName]) {
+          return reply.status(404).json({
+            success: false,
+            message: "File not found in screener_file",
+          });
+        }
+
+        await prisma.screener_file.update({
+          where: { id },
+          data: { [fieldName]: null },
+        });
+
+        await deleteFileFromDisk(url);
+        updated = true;
+        break;
+
+      case "custom_shafts":
+        const validShaftFields = ["image3d_1", "image3d_2"];
+        if (!validShaftFields.includes(fieldName)) {
+          return reply.status(400).send({
+            success: false,
+            message: `Invalid field for custom_shafts: ${fieldName}`,
+          });
+        }
+
+        const shaftRow = await prisma.custom_shafts.findUnique({
+          where: { id },
+          select: { [fieldName]: true },
+        });
+
+        if (!shaftRow || !shaftRow[fieldName]) {
+          return reply.status(404).json({
+            success: false,
+            message: "File not found in custom_shafts",
+          });
+        }
+
+        await prisma.custom_shafts.update({
+          where: { id },
+          data: { [fieldName]: null },
+        });
+
+        await deleteFileFromDisk(url);
+        updated = true;
+        break;
+
+      default:
+        return reply.status(400).send({
+          success: false,
+          message: "Unsupported table",
+        });
+    }
+
+    reply.status(200).send({
+      success: true,
+      message: deleted
+        ? "File and record deleted successfully"
+        : "File removed and field updated successfully",
+      data: {
+        id,
+        table,
+        fieldName,
+        url,
+        action: deleted ? "deleted" : "field_cleared",
+      },
+    });
+  } catch (error: any) {
+    console.error("Delete Customer File Error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Failed to delete file",
+      error: error.message,
+    });
+  }
+};
+
+// -----------------------------------------------------------------
+// Update Customer File Controller
+// -----------------------------------------------------------------
+export const updateCustomerFile = async (request, reply) => {
+  const prisma = request.server.prisma;
+  const files = request.files as any;
+  const { id, table, fieldName, oldUrl } = request.body;
+
+  const cleanupFiles = () => {
+    if (!files) return;
+    Object.keys(files).forEach((key) => {
+      files[key].forEach((file: any) => {
+        // try {
+        //   fs.unlinkSync(file.path);
+        // } catch (err) {
+        //   console.error(`Failed to delete file ${file.path}`, err);
+        // }
+        FileService.removeFileByPath(file.path);
+      });
+    });
+  };
+
+  // Validate required fields
+  if (!id || !table || !fieldName || !oldUrl) {
+    cleanupFiles();
+    return reply.status(400).send({
+      success: false,
+      message: "id, table, fieldName, and oldUrl are required",
+    });
+  }
+
+  // Validate table
+  const allowedTables = [
+    "screener_file",
+    "custom_shafts",
+    "customer_files",
+  ] as const;
+  if (!allowedTables.includes(table as any)) {
+    cleanupFiles();
+    return reply.status(400).send({
+      success: false,
+      message: `Invalid table. Allowed: ${allowedTables.join(", ")}`,
+    });
+  }
+
+  // Check if new file is uploaded
+  if (!files || !files.image || !files.image[0]) {
+    cleanupFiles();
+    return reply.status(400).send({
+      success: false,
+      message:
+        "New file is required. Please upload a file with field name 'image'",
+    });
+  }
+
+  try {
+    const uploadedFile = files.image[0];
+    const newFilename = uploadedFile.filename;
+
+    // -----------------------------------------------------------------
+    // Switch: Handle per table logic
+    // -----------------------------------------------------------------
+    switch (table) {
+      case "customer_files": {
+        // Find existing record
+        const customerFile = await prisma.customer_files.findUnique({
+          where: { id },
+          select: { url: true, customerId: true, createdAt: true },
+        });
+
+        if (!customerFile) {
+          cleanupFiles();
+          return reply.status(404).json({
+            success: false,
+            message: "File record not found",
+          });
+        }
+
+        // Verify oldUrl matches
+        if (customerFile.url !== oldUrl) {
+          cleanupFiles();
+          return reply.status(400).send({
+            success: false,
+            message: "oldUrl does not match the current file URL",
+          });
+        }
+
+        // Delete old file from disk
+        await deleteFileFromDisk(oldUrl);
+
+        // Update database with new file
+        const updatedFile = await prisma.customer_files.update({
+          where: { id },
+          data: { url: newFilename },
+        });
+
+        const baseUrl =
+          process.env.APP_URL || request.protocol + "://" + request.get("host");
+        const formattedEntry = {
+          fieldName: "image",
+          table: "customer_files",
+          url: newFilename,
+          id: updatedFile.id,
+          fileType: getFileType(newFilename),
+          createdAt: updatedFile.createdAt,
+          fullUrl: getImageUrl(newFilename),
+        };
+
+        return reply.status(200).send({
+          success: true,
+          message: "File updated successfully",
+          data: formattedEntry,
+        });
+      }
+
+      case "screener_file": {
+        // Validate field
+        const validScreenerFields = [
+          "picture_10",
+          "picture_23",
+          "threed_model_left",
+          "picture_17",
+          "picture_11",
+          "picture_24",
+          "threed_model_right",
+          "picture_16",
+          "csvFile",
+        ];
+
+        if (!validScreenerFields.includes(fieldName)) {
+          cleanupFiles();
+          return reply.status(400).send({
+            success: false,
+            message: `Invalid field for screener_file: ${fieldName}`,
+          });
+        }
+
+        // Find existing record
+        const screenerRow = await prisma.screener_file.findUnique({
+          where: { id },
+          select: { [fieldName]: true, createdAt: true },
+        });
+
+        if (!screenerRow || !screenerRow[fieldName]) {
+          cleanupFiles();
+          return reply.status(404).json({
+            success: false,
+            message: "File not found in screener_file",
+          });
+        }
+
+        // Verify oldUrl matches
+        if (screenerRow[fieldName] !== oldUrl) {
+          cleanupFiles();
+          return reply.status(400).send({
+            success: false,
+            message: "oldUrl does not match the current file URL",
+          });
+        }
+
+        // Delete old file from disk
+        await deleteFileFromDisk(oldUrl);
+
+        // Update database with new file
+        await prisma.screener_file.update({
+          where: { id },
+          data: { [fieldName]: newFilename },
+        });
+
+        const baseUrl =
+          process.env.APP_URL || request.protocol + "://" + request.get("host");
+        const formattedEntry = {
+          fieldName,
+          table: "screener_file",
+          url: newFilename,
+          id,
+          fileType: getFileType(newFilename),
+          createdAt: screenerRow.createdAt,
+          fullUrl: getImageUrl(newFilename),
+        };
+
+        return reply.status(200).send({
+          success: true,
+          message: "File updated successfully",
+          data: formattedEntry,
+        });
+      }
+
+      case "custom_shafts": {
+        // Validate field
+        const validShaftFields = ["image3d_1", "image3d_2"];
+        if (!validShaftFields.includes(fieldName)) {
+          cleanupFiles();
+          return reply.status(400).send({
+            success: false,
+            message: `Invalid field for custom_shafts: ${fieldName}`,
+          });
+        }
+
+        // Find existing record
+        const shaftRow = await prisma.custom_shafts.findUnique({
+          where: { id },
+          select: { [fieldName]: true, createdAt: true },
+        });
+
+        if (!shaftRow || !shaftRow[fieldName]) {
+          cleanupFiles();
+          return reply.status(404).json({
+            success: false,
+            message: "File not found in custom_shafts",
+          });
+        }
+
+        // Verify oldUrl matches
+        if (shaftRow[fieldName] !== oldUrl) {
+          cleanupFiles();
+          return reply.status(400).send({
+            success: false,
+            message: "oldUrl does not match the current file URL",
+          });
+        }
+
+        // Delete old file from disk
+        await deleteFileFromDisk(oldUrl);
+
+        // Update database with new file
+        await prisma.custom_shafts.update({
+          where: { id },
+          data: { [fieldName]: newFilename },
+        });
+
+        const baseUrl =
+          process.env.APP_URL || request.protocol + "://" + request.get("host");
+        const formattedEntry = {
+          fieldName,
+          table: "custom_shafts",
+          url: newFilename,
+          id,
+          fileType: getFileType(newFilename),
+          createdAt: shaftRow.createdAt,
+          fullUrl: getImageUrl(newFilename),
+        };
+
+        return reply.status(200).send({
+          success: true,
+          message: "File updated successfully",
+          data: formattedEntry,
+        });
+      }
+
+      default:
+        cleanupFiles();
+        return reply.status(400).send({
+          success: false,
+          message: "Unsupported table",
+        });
+    }
+  } catch (error: any) {
+    console.error("Update Customer File Error:", error);
+    cleanupFiles();
+    return reply.status(500).send({
+      success: false,
+      message: "Failed to update file",
+      error: error.message,
+    });
+  }
+};

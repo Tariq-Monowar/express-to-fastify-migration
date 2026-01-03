@@ -1,0 +1,1057 @@
+ 
+ 
+import { getImageUrl } from "../../../utils/baseurl";
+import { FileService } from "../../../utils/fileService";
+// import { getImageUrl } from "../../../utils/base_utl";
+ 
+
+export const getAllVersorgungen = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    // lalso i need status this status is from supplyStatus table status
+    const { page = 1, limit = 10, status, diagnosis_status } = request.query;
+
+    const pageNumber = parseInt(page as string, 10);
+    const limitNumber = parseInt(limit as string, 10);
+
+    if (isNaN(pageNumber) || isNaN(limitNumber)) {
+      return request.status(400).json({
+        success: false,
+        message: "Invalid type page or limit",
+      });
+    }
+    const filters: any = {
+      partnerId: request.user.id,
+    };
+
+    if (status) {
+      filters.supplyStatus = { name: status as string };
+    }
+
+    // Filter by diagnosis_status (now an array, use hasEvery or has to check if array contains the value)
+    if (typeof diagnosis_status === "string" && diagnosis_status.length) {
+      filters.diagnosis_status = {
+        has: diagnosis_status as any,
+      } as any;
+    }
+
+    const totalCount = await prisma.versorgungen.count({ where: filters });
+
+    const versorgungenList = await prisma.versorgungen.findMany({
+      where: filters,
+      skip: (pageNumber - 1) * limitNumber,
+      take: limitNumber,
+      orderBy: { createdAt: "desc" },
+      include: {
+        store: {
+          select: {
+            groessenMengen: true,
+          },
+        },
+        supplyStatus: {
+          select: {
+            name: true,
+            price: true,
+            image: true,
+          },
+        },
+      },
+    });
+
+    const formattedVersorgungen = versorgungenList.map(
+      ({ store, ...rest }) => ({
+        ...rest,
+        store: store?.groessenMengen ?? null,
+        supplyStatus: {
+          name: rest.supplyStatus?.name ?? null,
+          price: rest.supplyStatus?.price ?? null,
+          image: rest.supplyStatus?.image
+            ? getImageUrl(`/uploads/${rest.supplyStatus.image}`)
+            : null,
+        },
+      })
+    );
+    // groessenMengen
+    const totalPages = Math.ceil(totalCount / limitNumber);
+
+    reply.status(200).send({
+      success: true,
+      message: "Versorgungen fetched successfully",
+      data: formattedVersorgungen,
+      pagination: {
+        totalItems: totalCount,
+        totalPages,
+        currentPage: pageNumber,
+        itemsPerPage: limitNumber,
+      },
+    });
+  } catch (error) {
+    console.error("Get All Versorgungen error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+const normalizeMaterialInput = (input: unknown): string[] => {
+  if (Array.isArray(input)) {
+    return input
+      .map((item) => (typeof item === "string" ? item.trim() : String(item)))
+      .filter((item) => item.length > 0);
+  }
+
+  if (typeof input === "string") {
+    return input
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  return [];
+};
+
+export const createVersorgungen = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const {
+      name,
+      rohlingHersteller,
+      artikelHersteller,
+      versorgung,
+      material,
+      // langenempfehlung,
+      supplyStatusId,
+      diagnosis_status,
+      storeId,
+    } = request.body;
+
+    const partnerId = request.user.id;
+
+    const requiredFields = {
+      name,
+      rohlingHersteller,
+      artikelHersteller,
+      versorgung,
+      material,
+      supplyStatusId,
+      storeId,
+    };
+    const missingField = Object.entries(requiredFields).find(
+      ([key, value]) => !value
+    )?.[0];
+    if (missingField) {
+      return reply.status(400).send({
+        success: false,
+        message: `${missingField} is required!`,
+      });
+    }
+
+    // Validate diagnosis_status (now accepts array)
+    const validDiagnosisStatuses = [
+      "HAMMERZEHEN_KRALLENZEHEN",
+      "MORTON_NEUROM",
+      "FUSSARTHROSE",
+      "STRESSFRAKTUREN_IM_FUSS",
+      "DIABETISCHES_FUSSSYNDROM",
+      "HOHLFUSS",
+      "KNICKFUSS",
+      "KNICK_SENKFUSS",
+      "HALLUX_VALGUS",
+      "HALLUX_RIGIDUS",
+      "PLANTARFASZIITIS",
+      "FERSENSPORN",
+      "SPREIZFUSS",
+      "SENKFUSS",
+      "PLATTFUSS",
+    ];
+    
+    // Normalize diagnosis_status to array (empty array means no status)
+    let normalizedDiagnosisStatus: string[] = [];
+    if (diagnosis_status !== undefined && diagnosis_status !== null) {
+      if (Array.isArray(diagnosis_status)) {
+        normalizedDiagnosisStatus = diagnosis_status.filter(Boolean);
+      } else if (typeof diagnosis_status === "string") {
+        normalizedDiagnosisStatus = [diagnosis_status];
+      }
+      
+      // Validate all values in the array
+      if (normalizedDiagnosisStatus.length > 0) {
+        const invalidStatuses = normalizedDiagnosisStatus.filter(
+          (status) => !validDiagnosisStatuses.includes(status)
+        );
+        if (invalidStatuses.length > 0) {
+          return reply.status(400).send({
+            success: false,
+            message: `Invalid diagnosis_status values: ${invalidStatuses.join(", ")}. Valid values are: ${validDiagnosisStatuses.join(", ")}`,
+          });
+        }
+      }
+    }
+
+    const normalizedMaterial = normalizeMaterialInput(material);
+
+    if (normalizedMaterial.length === 0) {
+      return reply.status(400).send({
+        success: false,
+        message: "material must contain at least one value",
+      });
+    }
+
+    //valid supplyStatusId
+    const existingSupplyStatus = await prisma.supplyStatus.findUnique({
+      where: { id: supplyStatusId },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existingSupplyStatus) {
+      return reply.status(400).send({
+        success: false,
+        message: "supplyStatus not found",
+      });
+    }
+
+    //valid storeId
+    const existingStore = await prisma.stores.findUnique({
+      where: { id: storeId },
+    });
+    if (!existingStore) {
+      return reply.status(400).send({
+        success: false,
+        message: "store not found",
+      });
+    }
+
+    //check partner id is valid
+    const existingPartner = await prisma.user.findUnique({
+      where: { id: partnerId },
+    });
+    if (!existingPartner) {
+      return reply.status(400).send({
+        success: false,
+        message: "partner not found",
+      });
+    }
+
+    if (existingStore.userId !== partnerId) {
+      return reply.status(400).send({
+        success: false,
+        message: "store not found",
+      });
+    }
+
+    //create versorgungen
+    const newVersorgungen = await prisma.versorgungen.create({
+      data: {
+        name,
+        rohlingHersteller,
+        artikelHersteller,
+        versorgung,
+        material: normalizedMaterial,
+
+        diagnosis_status: normalizedDiagnosisStatus as any,
+        partner: {
+          connect: { id: partnerId },
+        },
+        supplyStatus: {
+          connect: { id: supplyStatusId },
+        },
+        store: { connect: { id: storeId } },
+      },
+      select: {
+        id: true,
+        name: true,
+        rohlingHersteller: true,
+        artikelHersteller: true,
+        versorgung: true,
+        material: true,
+        diagnosis_status: true,
+        supplyStatus: {
+          select: {
+            name: true,
+            price: true,
+            image: true,
+          },
+        },
+        store: {
+          select: {
+            groessenMengen: true,
+          },
+        },
+      },
+    });
+
+    const formattedVersorgungen = {
+      ...newVersorgungen,
+      supplyStatus: newVersorgungen.supplyStatus
+        ? {
+            ...newVersorgungen.supplyStatus,
+            image: newVersorgungen.supplyStatus.image
+              ? getImageUrl(newVersorgungen.supplyStatus.image)
+              : null,
+          }
+        : null,
+      store: newVersorgungen.store
+        ? newVersorgungen.store.groessenMengen ?? null
+        : null,
+    };
+
+    reply.status(201).json({
+      success: true,
+      message: "Versorgungen created successfully",
+      data: formattedVersorgungen,
+    });
+  } catch (error) {
+    console.error("Create Versorgungen error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const patchVersorgungen = async (request, reply) => {
+  try {
+    const prisma = request.server.prisma;
+    const { id } = request.params;
+    const partnerId = request.user.id;
+
+    const existing = await prisma.versorgungen.findFirst({
+      where: { id, partnerId },
+    });
+
+    if (!existing) {
+      return reply.status(404).json({
+        success: false,
+        message: "Versorgungen not found",
+      });
+    }
+
+    const { material, storeId, supplyStatusId, ...rest } = request.body;
+
+    // Validate and normalize diagnosis_status if provided (now accepts array)
+    if (rest.diagnosis_status !== undefined) {
+      const validDiagnosisStatuses = [
+        "HAMMERZEHEN_KRALLENZEHEN",
+        "MORTON_NEUROM",
+        "FUSSARTHROSE",
+        "STRESSFRAKTUREN_IM_FUSS",
+        "DIABETISCHES_FUSSSYNDROM",
+        "HOHLFUSS",
+        "KNICKFUSS",
+        "KNICK_SENKFUSS",
+        "HALLUX_VALGUS",
+        "HALLUX_RIGIDUS",
+        "PLANTARFASZIITIS",
+        "FERSENSPORN",
+        "SPREIZFUSS",
+        "SENKFUSS",
+        "PLATTFUSS",
+      ];
+
+      let normalizedDiagnosisStatus: string[] = [];
+      if (rest.diagnosis_status !== null && rest.diagnosis_status !== undefined) {
+        if (Array.isArray(rest.diagnosis_status)) {
+          normalizedDiagnosisStatus = rest.diagnosis_status.filter(Boolean);
+        } else if (typeof rest.diagnosis_status === "string") {
+          normalizedDiagnosisStatus = [rest.diagnosis_status];
+        }
+        
+        // Validate all values in the array
+        if (normalizedDiagnosisStatus.length > 0) {
+          const invalidStatuses = normalizedDiagnosisStatus.filter(
+            (status) => !validDiagnosisStatuses.includes(status)
+          );
+          if (invalidStatuses.length > 0) {
+            return reply.status(400).send({
+              success: false,
+              message: `Invalid diagnosis_status values: ${invalidStatuses.join(", ")}. Valid values are: ${validDiagnosisStatuses.join(", ")}`,
+            });
+          }
+        }
+      }
+      
+      // Update the rest object with normalized array
+      rest.diagnosis_status = normalizedDiagnosisStatus as any;
+    }
+
+    const updateData: any = {};
+
+    // Update only fields provided
+    Object.keys(rest).forEach((key) => {
+      if (rest[key] !== undefined) updateData[key] = rest[key];
+    });
+
+    // Material update
+    if (material !== undefined) {
+      const normalizedMaterial = normalizeMaterialInput(material);
+      if (normalizedMaterial.length === 0) {
+        return reply.status(400).send({
+          success: false,
+          message: "material must contain at least one value",
+        });
+      }
+      updateData.material = normalizedMaterial;
+    }
+
+    // Store connect / disconnect
+    if (storeId !== undefined) {
+      // Validate storeId if connecting
+      if (storeId) {
+        const existingStore = await prisma.stores.findUnique({
+          where: { id: storeId },
+        });
+
+        if (!existingStore) {
+          return reply.status(400).send({
+            success: false,
+            message: "store not found",
+          });
+        }
+
+        // Check if store belongs to partner
+        if (existingStore.userId !== partnerId) {
+          return reply.status(400).send({
+            success: false,
+            message: "store not found",
+          });
+        }
+      }
+
+      updateData.store = storeId
+        ? { connect: { id: storeId } }
+        : { disconnect: true };
+    }
+
+    // SupplyStatus update if provided
+    if (supplyStatusId !== undefined) {
+      if (supplyStatusId) {
+        const existingSupplyStatus = await prisma.supplyStatus.findUnique({
+          where: { id: supplyStatusId },
+          select: { id: true },
+        });
+
+        if (!existingSupplyStatus) {
+          return reply.status(400).send({
+            success: false,
+            message: "supplyStatus not found",
+          });
+        }
+
+        updateData.supplyStatus = { connect: { id: supplyStatusId } };
+      } else {
+        updateData.supplyStatus = { disconnect: true };
+      }
+    }
+
+    updateData.updatedBy = request.user.id;
+
+    // Update + include store & supplyStatus
+    const updated = await prisma.versorgungen.update({
+      where: { id },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        rohlingHersteller: true,
+        artikelHersteller: true,
+        versorgung: true,
+        material: true,
+        diagnosis_status: true,
+        supplyStatus: {
+          select: {
+            name: true,
+            price: true,
+            image: true,
+          },
+        },
+        store: {
+          select: {
+            groessenMengen: true,
+          },
+        },
+      },
+    });
+
+    // Format the response exactly like createVersorgungen
+    const formattedResponse = {
+      ...updated,
+      supplyStatus: updated.supplyStatus
+        ? {
+            ...updated.supplyStatus,
+            image: updated.supplyStatus.image
+              ? getImageUrl(updated.supplyStatus.image)
+              : null,
+          }
+        : null,
+      store: updated.store ? updated.store?.groessenMengen : null,
+    };
+
+    return reply.status(200).send({
+      success: true,
+      message: "Versorgungen updated successfully",
+      data: formattedResponse,
+    });
+  } catch (error) {
+    console.error("Patch Versorgungen error:", error);
+    return reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const deleteVersorgungen = async (request, reply) => {
+  try {
+    const prisma = request.server.prisma;
+    const { id } = request.params;
+    const { partnerId } = request.user?.id;
+
+    const existing = await prisma.versorgungen.findFirst({
+      where: { id },
+    });
+
+    if (!existing) {
+      return reply.status(404).json({
+        success: false,
+        message: "Versorgungen not found",
+      });
+    }
+
+    let needId = await prisma.versorgungen.delete({
+      where: { id },
+    });
+
+    return reply.status(200).send({
+      success: true,
+      message: "Versorgungen deleted successfully",
+      data: {
+        id: needId?.id,
+      },
+    });
+  } catch (error) {
+    console.error("Delete Versorgungen error:", error);
+    return reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const getVersorgungenByDiagnosis = async (request, reply) => {
+  try {
+    const { diagnosis_status } = request.params;
+    const prisma = request.server.prisma;
+    const { page = 1, limit = 10, status } = request.query;
+    const partnerId = request.user.id;
+
+    const pageNumber = parseInt(page as string, 10);
+    const limitNumber = parseInt(limit as string, 10);
+
+    if (isNaN(pageNumber) || isNaN(limitNumber)) {
+      return reply.status(400).send({
+        success: false,
+        message: "Invalid type page or limit",
+      });
+    }
+
+    // Validate diagnosis_status
+    const validDiagnosisStatuses = [
+      "HAMMERZEHEN_KRALLENZEHEN",
+      "MORTON_NEUROM",
+      "FUSSARTHROSE",
+      "STRESSFRAKTUREN_IM_FUSS",
+      "DIABETISCHES_FUSSSYNDROM",
+      "HOHLFUSS",
+      "KNICKFUSS",
+      "KNICK_SENKFUSS",
+      "HALLUX_VALGUS",
+      "HALLUX_RIGIDUS",
+      "PLANTARFASZIITIS",
+      "FERSENSPORN",
+      "SPREIZFUSS",
+      "SENKFUSS",
+      "PLATTFUSS",
+    ];
+
+    if (!validDiagnosisStatuses.includes(diagnosis_status)) {
+      return reply.status(400).send({
+        success: false,
+        message: `Invalid diagnosis_status. Valid values are: ${validDiagnosisStatuses.join(
+          ", "
+        )}`,
+      });
+    }
+
+    // Build the filter query - diagnosis_status is now an array
+    const whereClause: any = {
+      partnerId: partnerId, // Use partnerId instead of createdBy
+    };
+    
+    // If diagnosis_status filter is provided, check if array contains the value
+    if (diagnosis_status) {
+      whereClause.diagnosis_status = {
+        has: diagnosis_status as any,
+      } as any;
+    }
+
+    // If status filter is provided, filter by supplyStatus name
+    if (status) {
+      whereClause.supplyStatus = {
+        name: status as string,
+      };
+    }
+
+    // Get total count
+    const totalCount = await prisma.versorgungen.count({
+      where: whereClause,
+    });
+
+    // Get paginated results with related data
+    const versorgungenList = await prisma.versorgungen.findMany({
+      where: whereClause,
+      skip: (pageNumber - 1) * limitNumber,
+      take: limitNumber,
+      orderBy: {
+        createdAt: "desc",
+      },
+      include: {
+        supplyStatus: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            image: true,
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            produktname: true,
+            groessenMengen: true,
+          },
+        },
+      },
+    });
+
+    // Format the response to include image URLs and consistent structure
+    const formattedVersorgungenList = versorgungenList.map((versorgung) => ({
+      id: versorgung.id,
+      name: versorgung.name,
+      rohlingHersteller: versorgung.rohlingHersteller,
+      artikelHersteller: versorgung.artikelHersteller,
+      versorgung: versorgung.versorgung,
+      material: versorgung.material,
+      diagnosis_status: versorgung.diagnosis_status,
+      createdAt: versorgung.createdAt,
+      updatedAt: versorgung.updatedAt,
+      supplyStatus: versorgung.supplyStatus
+        ? {
+            ...versorgung.supplyStatus,
+            image: versorgung.supplyStatus.image
+              ? getImageUrl(`/uploads/${versorgung.supplyStatus.image}`)
+              : null,
+          }
+        : null,
+      store: versorgung.store
+        ? {
+            id: versorgung.store.id,
+            name: versorgung.store.produktname,
+            groessenMengen: versorgung.store.groessenMengen,
+          }
+        : null,
+    }));
+
+    const totalPages = Math.ceil(totalCount / limitNumber);
+
+    reply.status(200).send({
+      success: true,
+      message: `Versorgungen for ${diagnosis_status} fetched successfully`,
+      data: formattedVersorgungenList,
+      pagination: {
+        totalItems: totalCount,
+        totalPages,
+        currentPage: pageNumber,
+        itemsPerPage: limitNumber,
+      },
+      diagnosis_status: diagnosis_status,
+    });
+  } catch (error) {
+    console.error("Get Versorgungen by Diagnosis error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const getSingleVersorgungen = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const { id } = request.params;
+
+    const versorgungen = await prisma.versorgungen.findUnique({
+      where: { id },
+      include: {
+        supplyStatus: {
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            image: true,
+          },
+        },
+        store: {
+          select: {
+            groessenMengen: true,
+          },
+        },
+      },
+    });
+
+    if (!versorgungen) {
+      return reply.status(404).json({
+        success: false,
+        message: "Versorgungen not found",
+      });
+    }
+    const formattedVersorgungen = {
+      ...versorgungen,
+      supplyStatus: versorgungen.supplyStatus
+        ? {
+            ...versorgungen.supplyStatus,
+            image: versorgungen.supplyStatus.image
+              ? getImageUrl(versorgungen.supplyStatus.image)
+              : null,
+          }
+        : null,
+      store: versorgungen.store ? versorgungen.store.groessenMengen : null,
+    };
+    reply.status(200).send({
+      success: true,
+      message: "Versorgungen fetched successfully",
+      data: formattedVersorgungen,
+    });
+  } catch (error) {
+    console.error("Get Single Versorgungen error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+//-------------------------------- Supply Status --------------------------------
+
+export const getSupplyStatus = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const partnerId = request.user.id;
+
+    const { page = 1, limit = 10 } = request.query;
+    const pageNumber = parseInt(page as string, 10);
+    const limitNumber = parseInt(limit as string, 10);
+
+    if (isNaN(pageNumber) || isNaN(limitNumber)) {
+      return reply.status(400).send({
+        success: false,
+        message: "Invalid type page or limit",
+      });
+    }
+
+    const totalCount = await prisma.supplyStatus.count({
+      where: {
+        partnerId: partnerId,
+      },
+    });
+
+    const totalPages = Math.ceil(totalCount / limitNumber);
+
+    const supplyStatus = await prisma.supplyStatus.findMany({
+      where: {
+        partnerId: partnerId,
+      },
+      skip: (pageNumber - 1) * limitNumber,
+      take: limitNumber,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price: true,
+        image: true,
+      },
+    });
+
+    const allStatusNames = await prisma.supplyStatus.findMany({
+      where: { partnerId },
+      select: { name: true },
+      orderBy: { name: "asc" }, // optional
+    });
+
+    const statusList = allStatusNames.map((s) => s.name);
+
+    const formattedSupplyStatus = supplyStatus.map((item) => ({
+      ...item,
+      image: item.image ? getImageUrl(item.image) : null,
+    }));
+
+    reply.status(200).send({
+      success: true,
+      message: "Supply status fetched successfully",
+      data: formattedSupplyStatus,
+      status: statusList,
+      pagination: {
+        totalItems: totalCount,
+        totalPages,
+        currentPage: pageNumber,
+        itemsPerPage: limitNumber,
+        hasNextPage: pageNumber < totalPages,
+        hasPrevPage: pageNumber > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Get Supply Status error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const getSingleSupplyStatus = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const { id } = request.params;
+    const supplyStatus = await prisma.supplyStatus.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price: true,
+        image: true,
+        partner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+      },
+    });
+
+    reply.status(200).send({
+      success: true,
+      message: "Supply status fetched successfully",
+      data: {
+        ...supplyStatus,
+        image: supplyStatus.image
+          ? getImageUrl(supplyStatus.image)
+          : null,
+        partner: supplyStatus.partner
+          ? {
+              ...supplyStatus.partner,
+              image: supplyStatus.partner.image
+                ? getImageUrl(supplyStatus.partner.image)
+                : null,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Get Single Supply Status error:", error);
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const createSupplyStatus = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const { name, price, description } = request.body;
+    const image = request.file?.filename;
+
+    const priceFloat = parseFloat(price);
+    if (isNaN(priceFloat)) {
+      return reply.status(400).send({
+        success: false,
+        message: "Price must be a number",
+      });
+    }
+
+    const missingField = ["name", "price"].find((field) => !request.body[field]);
+    if (missingField) {
+      if (request.file) {
+        // const imagePath = path.join(
+        //   process.cwd(),
+        //   "uploads",
+        //   request.file.filename
+        // );
+        // if (fs.existsSync(imagePath)) {
+        //   fs.unlinkSync(imagePath);
+        // }
+        FileService.removeFile(request.file.filename);
+      }
+      return reply.status(400).send({
+        success: false,
+        message: `${missingField} is required`,
+      });
+    }
+    if (!image) {
+      return reply.status(400).send({
+        success: false,
+        message: "Image is required",
+      });
+    }
+
+    const partnerId = request.user?.id;
+
+    const supplyStatus = await prisma.supplyStatus.create({
+      data: {
+        name,
+        price: priceFloat,
+        image,
+        description: description || null,
+        partner: {
+          connect: { id: partnerId },
+        },
+      },
+    });
+
+    const imageUrl = image ? getImageUrl(`/uploads/${image}`) : null;
+
+    reply.status(201).json({
+      success: true,
+      message: "Supply status created successfully",
+      data: {
+        ...supplyStatus,
+        image: imageUrl,
+      },
+    });
+  } catch (error) {
+    console.error("Create Supply Status error:", error);
+    if (request.file) {
+      FileService.removeFile(request.file.filename);
+    }
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const updateSupplyStatus = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const { id } = request.params;
+    const partnerId = request.user.id;
+    const { name, price, description } = request.body;
+    const image = request.file?.filename;
+
+    const existing = await prisma.supplyStatus.findUnique({ where: { id } });
+    if (!existing)
+      return reply
+        .status(404)
+        .json({ success: false, message: "Supply status not found" });
+    if (existing.partnerId !== partnerId)
+      return reply
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+
+    // Prepare update data
+    const updateData: any = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (price !== undefined) {
+      const priceFloat = parseFloat(price);
+      if (isNaN(priceFloat))
+        return reply
+          .status(400)
+          .json({ success: false, message: "Price must be a number" });
+      updateData.price = priceFloat;
+    }
+
+    if (image) {
+      updateData.image = image;
+      // Remove old image
+      if (existing.image) {
+        FileService.removeFile(existing.image);
+      }
+    }
+
+    // Update and respond
+    const updated = await prisma.supplyStatus.update({
+      where: { id },
+      data: updateData,
+    });
+
+    reply.status(200).send({
+      success: true,
+      message: "Supply status updated",
+      data: {
+        ...updated,
+        image: updated.image ? getImageUrl(updated.image) : null,
+      },
+    });
+  } catch (error) {
+    console.error("Update error:", error);
+    // Clean up uploaded file on error
+    if (request.file) {
+      FileService.removeFile(request.file.filename);
+    }
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
+export const deleteSupplyStatus = async (request, reply) => {
+  const prisma = request.server.prisma;
+  try {
+    const { id } = request.params;
+ 
+    const supplyStatus = await prisma.supplyStatus.delete({
+      where: { id },
+    });
+
+    if (supplyStatus.image) {
+      FileService.removeFile(supplyStatus.image);
+    }
+
+    reply.status(200).send({
+      success: true,
+      message: "Supply status deleted successfully",
+      data: supplyStatus.id,
+    });
+  } catch (error) {
+    console.error("Delete Supply Status error:", error);
+
+    if (error.code === "P2025") {
+      return reply.status(404).json({
+        success: false,
+        message: "Supply status not found",
+      });
+    }
+    reply.status(500).send({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};

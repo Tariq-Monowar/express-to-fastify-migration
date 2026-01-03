@@ -1,0 +1,1464 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// The datasource `url` property is deprecated in Prisma 5+. Connection info should be moved
+// to prisma.config.ts, and the schema only retains the provider.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String  @id @default(uuid())
+  name     String?
+  email    String  @unique
+  password String
+  image    String?
+  role     Role    @default(ADMIN)
+
+  phone         String?
+  absenderEmail String?
+  bankName      String?
+  bankNumber    String?
+  busnessName   String? // Geschäftspartner Name / Account Name
+  hauptstandort String[] // Hauptstandort, main location
+  // weitereStandorte String[] // Other locations
+
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt
+  suggestions            SuggestionFeetf1rst[]
+  sentMessages           Message[]               @relation("sent_messages")
+  receivedMessages       Message[]               @relation("received_messages")
+  accounta               account[]
+  appointments           appointment[]
+  improvementSuggestions ImprovementSuggestion[]
+  messageVisibility      MessageVisibility[]
+  partnerOrders          customerOrders[]        @relation("PartnerOrders")
+  employees              Employees[]
+  customer_price         customer_price[]
+  bestellubersicht       Bestellubersicht?
+
+  // Mandatory one-to-one relationship
+  workshopNote             WorkshopNote?
+  stores                   Stores[]
+  StoresHistory            StoresHistory[]
+  custom_shafts            custom_shafts[]
+  // massschuheOrders massschuhe_order[]
+  massschuheOrders         massschuhe_order[]
+  controllQuestions        controllQuestions[]
+  customerOrdersHistories  customerOrdersHistory[]
+  massschuheOrderHistories massschuhe_order_history[]
+  supplyStatuses           supplyStatus[]
+  versorgungens            Versorgungen[]
+  customerSettings         customer_settings?
+  customerVersorgungens    customer_versorgungen[]
+  storeOrderOverviews      StoreOrderOverview[]
+  partnersSettings         partners_settings?
+  customerRequirements     customer_requirements[]
+  featureAccess            FeatureAccess?
+  notifications            notification[]
+  storeLocations           store_location[]
+  customers                customers[]
+  orderSettings            order_settings?
+
+  @@map("users")
+}
+
+model account {
+  id         String    @id @default(uuid())
+  expires_at DateTime?
+  user_id    String
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  token      String?
+}
+
+model ucode {
+  id         String   @id @default(uuid())
+  otp        String
+  name       String?
+  email      String   @unique
+  expired_at DateTime
+  createdAt  DateTime @default(now())
+}
+
+model Product {
+  id              String   @id @default(uuid())
+  name            String?
+  brand           String?
+  Category        String?
+  Sub_Category    String?
+  typeOfShoes     String?
+  productDesc     String?
+  price           Float?
+  availability    Boolean?
+  offer           Float?
+  size            Json?
+  feetFirstFit    String?
+  footLength      String?
+  technicalData   String?
+  characteristics Int[]
+  Company         String?
+  gender          Gender?
+  question        Json?
+  colors          Color[]
+  createdAt       DateTime @default(now())
+
+  @@index([id, name])
+}
+
+model Color {
+  id        String  @id @default(uuid())
+  colorName String
+  colorCode String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  images    Image[]
+}
+
+model Image {
+  id        String   @id @default(uuid())
+  url       String
+  color     Color    @relation(fields: [colorId], references: [id], onDelete: Cascade)
+  colorId   String
+  createdAt DateTime @default(now())
+}
+
+model appointment {
+  id            String   @id @default(uuid())
+  customer_name String
+  time          String
+  date          DateTime
+  reason        String
+  /// assignedTo মানে হচ্ছে employe name
+  assignedTo    String
+  employeId     String?
+  duration      Float?
+
+  details      String?
+  isClient     Boolean?
+  userId       String
+  reminder     Int?     @default(0)
+  reminderSent Boolean  @default(false)
+
+  customerId String?
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  appointmentEmployees AppointmentEmployee[]
+
+  createdAt DateTime @default(now())
+
+  @@map("appointment")
+}
+
+model AppointmentEmployee {
+  id            String @id @default(uuid())
+  appointmentId String
+
+  appointment appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  employeeId  String
+
+  employee   Employees @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedTo String // Employee name for this appointment
+
+  createdAt DateTime @default(now())
+
+  @@unique([appointmentId, employeeId])
+  @@index([appointmentId])
+  @@index([employeeId])
+  @@map("appointment_employee")
+}
+
+model SuggestionFeetf1rst {
+  id String @id @default(uuid())
+
+  reason     String
+  name       String
+  phone      String
+  suggestion String
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+}
+
+// name, email, firma, phone, suggestion
+model ImprovementSuggestion {
+  id         String   @id @default(uuid())
+  suggestion String
+  category   String?
+  image      String[]
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  createdAt DateTime @default(now())
+}
+
+model Message {
+  id             String              @id @default(uuid())
+  subject        String
+  content        String
+  senderId       String
+  sender         User                @relation("sent_messages", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId    String?
+  recipient      User?               @relation("received_messages", fields: [recipientId], references: [id], onDelete: SetNull)
+  recipientEmail String // For non-registered recipients
+  isFavorite     Boolean             @default(false)
+  isDeleted      Boolean             @default(false)
+  recipientType  RecipientType?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  visibilities   MessageVisibility[]
+
+  @@index([senderId])
+  @@index([recipientId])
+  @@map("messages")
+}
+
+enum RecipientType {
+  USER
+  CUSTOMER
+  EXTERNAL
+}
+
+model MessageVisibility {
+  id         String   @id @default(uuid())
+  messageId  String
+  userId     String
+  isDeleted  Boolean  @default(false)
+  isFavorite Boolean  @default(false)
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([messageId, userId])
+  @@index(messageId)
+  @@index(userId)
+  @@index([createdAt])
+  @@map("message_visibilities")
+}
+
+enum Role {
+  ADMIN
+  USER
+  PARTNER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  UNISEX
+}
+
+//-------------------------------------------------
+
+model Employees {
+  id              String  @id @default(uuid())
+  accountName     String
+  employeeName    String
+  email           String  @unique
+  password        String
+  financialAccess Boolean @default(false)
+
+  partnerId String
+  user      User   @relation(fields: [partnerId], references: [id])
+
+  WorkshopNote WorkshopNote?
+
+  // Many-to-many relation
+  // massschuheOrders massschuhe_order[] @relation("OrderEmployees")
+
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  appointmentEmployees     AppointmentEmployee[]
+  massschuheOrders         massschuhe_order[]
+  customerOrdersHistories  customerOrdersHistory[]
+  massschuheOrderHistories massschuhe_order_history[]
+  customerOrders           customerOrders[]
+
+  @@index([createdAt])
+}
+
+model WorkshopNote {
+  id String @id @default(uuid())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique
+
+  employeeId String?    @unique
+  employee   Employees? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  employeeName   String?
+  completionDays String   @default("5 Werktage")
+  pickupLocation String[]
+  sameAsBusiness Boolean  @default(true)
+
+  showCompanyLogo    Boolean @default(true)
+  autoShowAfterPrint Boolean @default(true)
+  autoApplySupply    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([createdAt])
+}
+
+model Versorgungen {
+  id   String @id @default(uuid())
+  name String
+
+  /// Rohling Hersteller is come form "Stores in  produktname" field
+  rohlingHersteller String
+
+  /// artikel Hersteller is come form "Stores in  hersteller" field
+  artikelHersteller String
+  versorgung        String
+
+  material String[]
+
+  // langenempfehlung Json?
+
+  // status           versorgungenStatus
+  diagnosis_status versorgungenDiagnosisStatus[] @default([])
+
+  // createdBy String
+  updatedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  partnerId String?
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  storeId String?
+  store   Stores? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  supplyStatusId String?
+  supplyStatus   supplyStatus? @relation(fields: [supplyStatusId], references: [id], onDelete: Cascade)
+  // massschuheOrders massschuhe_order[]
+
+  customerOrders customerOrders[]
+
+  @@index([id, name])
+  @@index([createdAt])
+}
+
+model supplyStatus {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  image       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  partnerId String
+  partner   User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  versorgungen          Versorgungen[]
+  customerVersorgungens customer_versorgungen[]
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([name])
+  @@index([price])
+  @@index([image])
+  @@index([name, price, image])
+  @@map("supply_status")
+}
+
+enum versorgungenStatus {
+  Alltagseinlagen
+  Sporteinlagen
+  Businesseinlagen
+}
+
+enum versorgungenDiagnosisStatus {
+  HAMMERZEHEN_KRALLENZEHEN
+  MORTON_NEUROM
+  FUSSARTHROSE
+  STRESSFRAKTUREN_IM_FUSS
+  DIABETISCHES_FUSSSYNDROM
+  HOHLFUSS
+  KNICKFUSS
+  KNICK_SENKFUSS
+  HALLUX_VALGUS
+  HALLUX_RIGIDUS
+  PLANTARFASZIITIS
+  FERSENSPORN
+  SPREIZFUSS
+  SENKFUSS
+  PLATTFUSS
+}
+
+model customer_price {
+  id                 String @id @default(uuid())
+  fußanalyse        Float?
+  einlagenversorgung Float?
+
+  partnerId String
+  partner   User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model customer_settings {
+  id String @id @default(uuid())
+
+  partnerId String @unique
+  user      User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  cover_types        String[]
+  laser_print_prices Json?
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  storeLocations store_location[]
+}
+
+model store_location {
+  id String @id @default(uuid())
+
+  partnerId String?
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  isPrimary Boolean @default(false)
+
+  address     String?
+  description String?
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  customerSettings    customer_settings? @relation(fields: [customer_settingsId], references: [id])
+  customer_settingsId String?
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@index([id])
+}
+
+model customers {
+  id             String  @id @default(uuid())
+  customerNumber Int // Unique per partnerId, not globally
+  vorname        String?
+  nachname       String?
+  email          String? @unique
+  // telefonnummer  String?
+  wohnort        String?
+
+  gender       String?
+  geburtsdatum String?
+  straße      String?
+  land         String?
+  ort          String?
+  telefon      String?
+
+  screenerFile screener_file[]
+
+  // this all data come form a single csv file
+  fusslange1   String? //B58   (.csv)
+  fusslange2   String? //C58   (.csv)
+  fussbreite1  String? //B73   (.csv)
+  fussbreite2  String? //C73   (.csv)
+  kugelumfang1 String? //B102  (.csv)
+  kugelumfang2 String? //C102  (.csv)
+  rist1        String? //B105  (.csv)
+  rist2        String? //C105  (.csv)
+  zehentyp1    String? //B136  (.csv)
+  zehentyp2    String? //C136  (.csv)
+  archIndex1   String? //B120  (.csv)
+  archIndex2   String? //C120  (.csv)
+
+  partnerId String
+  partner   User    @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  updatedBy String?
+
+  // Relation to KundenHistorie
+  customerHistorie customerHistorie[]
+
+  // Relation to UserAnswer
+  einlagenAnswers       einlagenAnswers[]
+  versorgungen          customer_versorgungen[] @relation("customerVersorgungen")
+  ausfuhrliche_diagnose String?
+  customerOrders        customerOrders[]
+  custom_shafts         custom_shafts[]
+
+  kundeSteuernummer String? // Kunde Steuernummer
+  diagnose          String? // Diagnose
+  kodexeMassschuhe  String? // Kodexe Massschuhe
+  kodexeEinlagen    String? // Kodexe Einlagen
+  sonstiges         String? // Sonstiges
+
+  fußanalyse        Float? //ইনসোল $
+  einlagenversorgung Float? //Foot analysis $
+
+  billingType String? // Billing Type
+
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  StoresHistory    StoresHistory[]
+  customer_files   customer_files[]
+  // massschuheOrders massschuhe_order[]
+  massschuheOrders massschuhe_order[]
+
+  shoeAnswers              shoeAnswers[]
+  insolesAnswers           insolesAnswers[]
+  massschuheOrderHistories massschuhe_order_history[]
+
+  @@unique([partnerId, customerNumber]) // Unique per partner
+  @@index([vorname, nachname])
+  // @@index([telefonnummer])
+  @@index([wohnort])
+  @@index([email])
+  @@index([id, vorname])
+  @@index([id, email])
+  @@index([createdAt])
+  @@index([partnerId])
+}
+
+model customer_requirements {
+  id String @id @default(uuid())
+
+  partnerId String @unique
+  partner   User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  vorname      Boolean @default(false)
+  nachname     Boolean @default(false)
+  geburtsdatum Boolean @default(false)
+  email        Boolean @default(false)
+  telefon      Boolean @default(false)
+  adresse      Boolean @default(false)
+  land         Boolean @default(false)
+  billingType  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@index([id])
+}
+
+model shoeAnswers {
+  id         String    @id @default(uuid())
+  customerId String
+  customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  answer     Json
+}
+
+model insolesAnswers {
+  id         String    @id @default(uuid())
+  customerId String
+  customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  answer     Json
+}
+
+model controllQuestions {
+  id String @id @default(uuid())
+
+  partnerId String @unique
+  partner   User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  controlShoeQuestions    Int[]
+  controlInsolesQuestions Int[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@index([id])
+}
+
+model screener_file {
+  id         String    @id @default(uuid())
+  customerId String
+  customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  //------------------------------------------------------
+  picture_10 String? //Fersenneigung left (image)
+  picture_23 String? //Plantaransicht left (image)
+
+  paint_24 String? //Paint Fersenneigung left (image)
+  paint_23 String? //Paint Plantaransicht left (image)
+  //------------------------------------------------------
+
+  threed_model_left  String? //3D-Model left   (.stl)
+  picture_17         String? //Sohlen Index left (image)
+  picture_11         String? //Fersenneigung right (image)
+  picture_24         String? //Plantaransich right  (image)
+  threed_model_right String? //3D-Model right   .stl
+  picture_16         String? //Sohlen Index right   (image)
+  csvFile            String?
+
+  // this all data come form a single csv file
+  fusslange1   String? //B58   (.csv)
+  fusslange2   String? //C58   (.csv)
+  fussbreite1  String? //B73   (.csv)
+  fussbreite2  String? //C73   (.csv)
+  kugelumfang1 String? //B102  (.csv)
+  kugelumfang2 String? //C102  (.csv)
+  rist1        String? //B105  (.csv)
+  rist2        String? //C105  (.csv)
+  zehentyp1    String? //B136  (.csv)
+  zehentyp2    String? //C136  (.csv)
+  archIndex1   String? //B120  (.csv)
+  archIndex2   String? //C120  (.csv)
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  customerOrders customerOrders[]
+
+  @@index([customerId])
+  @@index([id])
+  @@index([createdAt])
+}
+
+model customer_files {
+  id         String    @id @default(uuid())
+  customerId String
+  customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  url        String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model einlagenAnswers {
+  id         String           @id @default(uuid())
+  customerId String
+  customer   customers        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  category   QuestionCategory
+  questionId String
+  answer     Json
+
+  @@unique([customerId, questionId])
+  @@index([customerId])
+  @@index([category])
+  @@index([questionId])
+}
+
+enum QuestionCategory {
+  BUSINESSEINLAGE
+  ALLTAGSEINLAGE
+  SPORTEINLAGE
+}
+
+model customerHistorie {
+  id         String        @id @default(uuid())
+  customerId String
+  customer   customers     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  category   EventCategory
+
+  date DateTime?
+
+  // make a relation with customerOrders model
+  orderId String?
+  order   customerOrders? @relation("OrderCustomerHistorie", fields: [orderId], references: [id], onDelete: SetNull)
+
+  url       String?
+  methord   String?
+  paymentIs String?
+  eventId   String?
+
+  note        String?
+  system_note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([eventId])
+  @@index([category])
+  @@index([createdAt])
+}
+
+enum EventCategory {
+  Notizen //Notes
+  Bestellungen //Orders
+  Leistungen //Services
+  Rechnungen //Invoices
+  Zahlungen //Payments
+  Emails //Emails
+  Termin //Appointment
+}
+
+model customer_versorgungen {
+  id   String @id @default(uuid())
+  name String
+
+  /// Rohling Hersteller is come form "Stores in  produktname" field
+  rohlingHersteller String
+
+  /// artikel Hersteller is come form "Stores in  hersteller" field
+  artikelHersteller String
+  versorgung        String
+
+  material String[]
+
+  // status           versorgungenStatus
+  diagnosis_status versorgungenDiagnosisStatus[] @default([])
+
+  status             versorgungenStatus
+  cover_types        String?
+  laser_print_prices Float?
+
+  // createdBy String
+  updatedBy String?
+
+  partnerId String?
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  storeId String?
+  store   Stores? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  // supplyStatusId String?
+  // supplyStatus   supplyStatus? @relation(fields: [supplyStatusId], references: [id], onDelete: Cascade)
+  // // massschuheOrders massschuhe_order[]
+
+  customerOrders customerOrders[]
+
+  customerId String
+  customer   customers @relation("customerVersorgungen", fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  supplyStatus   supplyStatus? @relation(fields: [supplyStatusId], references: [id])
+  supplyStatusId String?
+
+  @@index([id, name])
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model customerOrders {
+  id String @id @default(uuid())
+
+  orderNumber Int // Unique per partner, not globally
+
+  customerId String?
+  customer   customers? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  partnerId String?
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: SetNull, name: "PartnerOrders")
+
+  versorgungId String? // Add this
+  Versorgungen Versorgungen? @relation(fields: [versorgungId], references: [id], onDelete: SetNull)
+
+  screenerId   String?
+  screenerFile screener_file? @relation(fields: [screenerId], references: [id], onDelete: SetNull)
+
+  fußanalyse        Float?
+  einlagenversorgung Float?
+  totalPrice         Float
+
+  product   customerProduct? @relation(fields: [productId], references: [id])
+  productId String?          @unique
+
+  orderStatus  OrderStatus @default(Warten_auf_Versorgungsstart)
+  // orderStatus  String?
+  statusUpdate DateTime?
+  invoice      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  StoresHistory StoresHistory[] @relation("OrderStoresHistory")
+
+  ausführliche_diagnose String?
+  versorgung_laut_arzt   String?
+  einlagentyp            String?
+  überzug               String?
+  // menge                  Int? //quantity
+  versorgung_note        String? //Hast du sonstige Anmerkungen oder Notizen zur Versorgung... ?
+  schuhmodell_wählen    String? //জুতার মডেল নির্বাচন করুন ম্যানুয়ালি লিখুন (ব্র্যান্ড + মডেল + সাইজ)
+  kostenvoranschlag      Boolean? @default(false)
+
+  bezahlt paymnentStatus?
+
+  discount Float?
+  quantity Int?
+
+  // Privet          String? // Bezahlt - string naw
+  // bezahltInsurance       String? // Bezahlt - string naw
+
+  storeId String?
+  store   Stores? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  // Werkstattzettel (inline fields to avoid extra API)
+  kundenName         String?
+  auftragsDatum      DateTime?
+  wohnort            String?
+  telefon            String?
+  email              String?
+  geschaeftsstandort String?
+  mitarbeiter        String?
+  fertigstellungBis  DateTime?
+  versorgung         String?
+
+  fussanalysePreis        Float?
+  einlagenversorgungPreis Float?
+
+  // werkstattEmployeeId String?
+  employeeId String?
+  employee   Employees? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  //make a relatio with employe
+
+  priority                Priority?               @default(Normal)
+  customerHistories       customerHistorie[]      @relation("OrderCustomerHistorie")
+  customerOrdersHistories customerOrdersHistory[]
+  customerVersorgungen    customer_versorgungen?  @relation(fields: [customer_versorgungenId], references: [id])
+  customer_versorgungenId String?
+
+  barcodeLabel     String?
+  barcodeCreatedAt DateTime?
+  // KrankenkasseStatus String? @default("Krankenkasse_Ungenehmigt")
+
+  @@unique([partnerId, orderNumber]) // Unique per partner
+  @@index([customerId])
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([totalPrice])
+  @@index([customerId, partnerId])
+  @@index([customerId, createdAt])
+}
+
+enum paymnentStatus {
+  Privat_Bezahlt //cash paymnant success
+  Privat_offen
+
+  Krankenkasse_Ungenehmigt
+  Krankenkasse_Genehmigt
+}
+
+// enum KrankenkasseStatus {
+//   Krankenkasse_Ungenehmigt
+//   Krankenkasse_Genehmigt
+// }
+
+enum Priority {
+  Dringend
+  Normal
+}
+
+model customerOrdersHistory {
+  id String @id @default(uuid())
+
+  orderId String
+  order   customerOrders @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  statusFrom OrderStatus
+  statusTo   OrderStatus
+
+  // Add this field to track payment status changes
+  paymentFrom     paymnentStatus?
+  paymentTo       paymnentStatus?
+  isPrementChange Boolean         @default(false)
+
+  //relation with user
+  partnerId String?
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  //relation with paetner employee
+  employeeId String?
+  employee   Employees? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model customerProduct {
+  id                String @id @default(uuid())
+  name              String
+  rohlingHersteller String
+  artikelHersteller String
+  versorgung        String
+  material          String
+  langenempfehlung  Json
+
+  status           versorgungenStatus
+  diagnosis_status versorgungenDiagnosisStatus[] @default([])
+
+  order customerOrders?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([status])
+  @@index([diagnosis_status])
+  @@index([rohlingHersteller])
+  @@index([artikelHersteller])
+  @@index([createdAt])
+  @@index([status, diagnosis_status])
+}
+
+enum OrderStatus {
+  Warten_auf_Versorgungsstart
+  In_Fertigung
+  Verpacken_Qualitätssicherung
+  Abholbereit_Versandt
+  Ausgeführt
+}
+
+model Stores {
+  id String @id @default(uuid())
+
+  /// Product name
+  produktname String
+
+  ///  প্রোডাক্টের প্রস্তুতকারক Manufacturer 
+  hersteller String
+
+  /// Article number / SKU
+  artikelnummer String
+
+  /// Storage location / warehouse location এটা আসবে ইউজার মডেলের hauptstandort[] এই অ্যাারে অফ স্ট্রিং থেকে
+  lagerort String?
+
+  /// Minimum stock level এটা দিয়ে স্টক ওইয়ারনিং দিবে যদি groessenMengen json এর কোন ভেলু এই int এর নিচে নামে তাহলে এটা স্টকে "Niedriger Bestand" এই wormning দবে যদি এই int এর উপরে নামে তাহলে এটা স্টকে "Voller Bestand" এই wormning দবে
+  mindestbestand Int?
+
+  /// Sizes & quantities (e.g., {"S": 10, "M": 20, "L": 15})
+  groessenMengen Json
+
+  purchase_price Int
+  selling_price  Int
+
+  /// এই স্টাটাস ডিপেন্ড করে mindestbestand এর উপর যদি mindestbestand এর উপরে থাকে তাহলে এটা "Voller Bestand" এই স্ট্রিং দিবে যদি mindestbestand এর নিচে থাকে তাহলে এটা "Niedriger Bestand" এই স্ট্রিং দিবে
+  Status String?
+
+  orthotech Boolean @default(false)
+  opannrit  Boolean @default(false)
+
+  /// versorgungen এর সাথে রিলেশন হচ্ছে ID,  Artikelhersteller = hersteller, Rohling Hersteller = Artikelbezeichnung (balance)
+  versorgungen Versorgungen[]
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  storesHistory StoresHistory[] // History of stock changes
+
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  customerOrders        customerOrders[]
+  customerVersorgungens customer_versorgungen[]
+  storeOrderOverviews   StoreOrderOverview[]
+
+  @@index([id, produktname])
+  @@map("stores")
+}
+
+model StoreOrderOverview {
+  id String @id @default(uuid())
+
+  storeId String
+  store   Stores @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  partnerId String
+  partner   User?  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  size                Int
+  length              Float
+  quantity            Int
+  auto_order_limit    Int
+  auto_order_quantity Int
+
+  status StoreOrderOverviewStatus?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum StoreOrderOverviewStatus {
+  In_bearbeitung
+  Versendet
+  Geliefert
+  Storniert
+}
+
+model StoresHistory {
+  id      String @id @default(uuid())
+  storeId String
+  store   Stores @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  changeType ChangeType
+  quantity   Int?
+  newStock   Int?
+  reason     String?
+  text       String?
+
+  partnerId String
+  user      User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  customerId String? // Optional: Link to customer if applicable
+  customer   customers? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  orderId String? // Optional: Link to order if applicable
+  order   customerOrders? @relation("OrderStoresHistory", fields: [orderId], references: [id], onDelete: SetNull)
+
+  status StoresHistoryStatus?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([storeId])
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([customerId])
+  @@index([orderId])
+  @@map("storeshistory")
+}
+
+enum StoresHistoryStatus {
+  SELL_OUT
+  STOCK_UPDATE
+}
+
+enum ChangeType {
+  // INCOMING // e.g., deliveries
+  // OUTGOING // e.g., sales, reservations
+  // CORRECTION // manual adjustments
+  // TRANSFER // between storage locations 
+  sales
+  createStock
+  updateStock
+}
+
+model Bestellubersicht {
+  id     String @id @default(uuid())
+  number Int
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model maßschaft_kollektion {
+  id String @id @default(uuid())
+
+  ide String?
+
+  name        String?
+  image       String?
+  price       Float?
+  catagoary   String?
+  gender      String?
+  description String?
+
+  customShafts custom_shafts[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model custom_shafts {
+  id String @id @default(uuid())
+
+  orderNumber           String? // if this 
+  other_customer_number String? // else this bot togather at a time for a customer
+
+  image3d_1         String?
+  image3d_2         String?
+  customerId        String?
+  lederfarbe        String?
+  innenfutter       String?
+  schafthohe        String?
+  polsterung        String?
+  vestarkungen      String?
+  vestarkungen_text String?
+  polsterung_text   String?
+
+  osen_einsetzen_price         Float?
+  Passenden_schnursenkel_price Float?
+
+  nahtfarbe      String?
+  nahtfarbe_text String?
+
+  lederType String?
+
+  maßschaftKollektionId String?
+  maßschaft_kollektion  maßschaft_kollektion? @relation(fields: [maßschaftKollektionId], references: [id])
+  customer               customers?             @relation(fields: [customerId], references: [id])
+
+  partnerId String?
+  user      User?   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  status custom_shafts_status? @default(Bestellung_eingegangen)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([customerId])
+  @@index([maßschaftKollektionId])
+  @@index([partnerId])
+  @@index([createdAt])
+}
+
+// enum custom_shafts_status {
+//   Bestellung_eingegangen
+//   In_Produktion
+//   Qualitätskontrolle
+//   Versandt
+//   Ausgeführte_Einlagen
+// }
+
+enum custom_shafts_status {
+  Neu
+  Zu_Produzent_abgeschickt
+  In_Bearbeitung
+  Zu_Kunde_abgeschickt
+  Bei_uns_angekommen
+  Beim_Kunden_angekommen
+
+  Bestellung_eingegangen
+  In_Produktion
+  Qualitätskontrolle
+  Versandt
+  Ausgeführt
+}
+
+//---------------------------massschuhe_order---------------------
+// model massschuhe_order {
+//   id String @id @default(uuid())
+
+//   customerId String
+//   customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+//   partnerId String
+//   user      User?  @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+//   ausführliche_diagnose String?
+//   versorgung_laut_arzt   String?
+
+//   //realtion with Versorgungen
+//   // diagnose
+//   versorgungenId String? // এটা diagnose এর সাথে রিলেশন হচ্ছে ID, এটা হচ্ছে versorgungenId
+//   versorgungen   Versorgungen? @relation(fields: [versorgungenId], references: [id], onDelete: SetNull)
+
+//   //employee relation but i need multiple employees
+//   // // MANY TO MANY EMPLOYEES
+//   // employees Employees[] @relation("OrderEmployees")
+
+//   einlagentyp         String?
+//   überzug            String?
+//   menge               Int? //quantity
+//   versorgung_note     String? //Hast du sonstige Anmerkungen oder Notizen zur Versorgung... ?
+//   schuhmodell_wählen String? //জুতার মডেল নির্বাচন করুন ম্যানুয়ালি লিখুন (ব্র্যান্ড + মডেল + সাইজ)
+//   kostenvoranschlag   Boolean? @default(false)
+
+//   // price section
+//   fußanalyse        Float?
+//   einlagenversorgung Float?
+//   totalPrice         Float
+
+//   // i wanna relation this with werkstattzettel
+//   werkstattzettel   Werkstattzettel? @relation(fields: [werkstattzettelId], references: [id], onDelete: SetNull, name: "massschuhe_order_relation")
+//   werkstattzettelId String?
+
+//   createdAt DateTime @default(now())
+//   updatedAt DateTime @updatedAt
+
+//   @@index([customerId])
+//   @@index([partnerId])
+//   @@index([createdAt])
+//   @@index([updatedAt])
+//   @@index([werkstattzettelId])
+//   @@index([versorgungenId])
+//   @@index([einlagentyp])
+//   @@index([überzug])
+//   @@index([menge])
+//   @@index([versorgung_note])
+//   @@index([schuhmodell_wählen])
+//   @@index([kostenvoranschlag])
+// }
+
+//---------------------------massschuhe_order---------------------  
+
+model massschuhe_order {
+  id String @id @default(uuid())
+
+  orderNumber Int?
+
+  arztliche_diagnose    String?
+  usführliche_diagnose String?
+  rezeptnummer          String?
+  durchgeführt_von     String?
+  note                  String?
+
+  albprobe_geplant   Boolean? @default(false)
+  kostenvoranschlag  Boolean? @default(false)
+  //-------------------------------------------------
+  //workload section
+  delivery_date      String?
+  telefon            String?
+  filiale            String? //location
+  kunde              String? //customer name
+  email              String?
+  button_text        String?
+  // PREISAUSWAHL
+  fußanalyse        Float?
+  einlagenversorgung Float?
+
+  bodenerstellungpdf String?
+  geliefertpdf       String?
+
+  customer_note String?
+  location      String?
+  //-------------------------------------------------
+  status        massschuhe_order_status @default(Leistenerstellung)
+  express       Boolean?                @default(false)
+
+  //-------------------------------------------------
+
+  //relation with users
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  employeeId String?
+  employee   Employees? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   customers? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  massschuheOrderHistories massschuhe_order_history[]
+
+  @@unique([userId, orderNumber]) // Unique per partner
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+enum massschuhe_order_status {
+  Leistenerstellung //started
+
+  Bettungsherstellung
+  Halbprobenerstellung
+  Schafterstellung
+  Bodenerstellung
+
+  Geliefert
+}
+
+// model massschuhe_status_treack {
+//   id String @id @default(uuid())
+
+//   massschuhe_orderId String
+//   massschuhe_order   massschuhe_order @relation(fields: [massschuhe_orderId], references: [id], onDelete: Cascade)
+
+//   statusFrom massschuhe_order_status?
+//   statusTo   massschuhe_order_status
+//   note       String?
+
+//   createdAt DateTime @default(now())
+//   updatedAt DateTime @updatedAt
+
+//   @@index([massschuhe_orderId])
+//   @@index([statusFrom])
+//   @@index([statusTo])
+//   @@index([createdAt])
+//   @@index([updatedAt])
+//   @@map("massschuhe_status_treack")
+// }
+
+//as like as customer order history
+model massschuhe_order_history {
+  id String @id @default(uuid())
+
+  statusFrom massschuhe_order_status?
+  statusTo   massschuhe_order_status
+
+  note String?
+
+  startedAt  DateTime  @default(now()) // when the step begins
+  finishedAt DateTime? // when the step is finished
+
+  massschuhe_orderId String
+  massschuhe_order   massschuhe_order @relation(fields: [massschuhe_orderId], references: [id], onDelete: Cascade)
+
+  partnerId String?
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  employeeId String?
+  employee   Employees? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   customers? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([massschuhe_orderId])
+  @@index([partnerId])
+  @@index([employeeId])
+  @@index([customerId])
+}
+
+// {
+//   category: "BUSINESSEINLAGE",
+//   userId: "123",
+// answers: [
+//   { questionId: 1, selected: "Sneaker" },
+//   { questionId: 3, selected: "Wenig aktiv" },
+//   { questionId: 4, selected: "Nein" },
+//   { questionId: 6, selected: [
+//     { questionId: 1, selected: "Seit mehreren Wochen" },
+//     { questionId: 2, selected: "Ich kann keine längeren Strecken mehr gehen" },
+//     { questionId: 3, selected: "Ziehend" },
+//     { questionId: 4, selected: "Beim Barfußgehen" },
+//   ]},
+//  { questionId: 7, selected: "Ja, Rückenschmerzen" },
+//  { questionId: 8, selected: "Ja, bitte angeben" }, 
+//  { questionId: 9, selected: "Schwarz" }, 
+// ]
+// }
+
+// https://chatgpt.com/share/688ca13d-c468-800c-8159-f0c30dccecbf8
+
+//---------------------------------------------------------------------------
+
+model FeatureAccess {
+  id String @id @default(uuid())
+
+  partnerId String @unique
+  partner   User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  // Dashboard Section
+  dashboard           Boolean @default(true)
+  teamchat            Boolean @default(true)
+  kundensuche         Boolean @default(true)
+  neukundenerstellung Boolean @default(true)
+  einlagenauftrage    Boolean @default(true)
+  massschuhauftrage   Boolean @default(true)
+  massschafte         Boolean @default(true)
+
+  // Product Management
+  produktverwaltung      Boolean @default(true)
+  sammelbestellungen     Boolean @default(true)
+  nachrichten            Boolean @default(true)
+  terminkalender         Boolean @default(true)
+  monatsstatistik        Boolean @default(true)
+  mitarbeitercontrolling Boolean @default(true)
+  einlagencontrolling    Boolean @default(true)
+  fusubungen             Boolean @default(true)
+  musterzettel           Boolean @default(true)
+  einstellungen          Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@map("feature_access")
+}
+
+model notification {
+  id String @id @default(uuid())
+
+  type notificationType?
+
+  partnerId String
+  user      User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  message String
+  eventId String?
+  route   String?
+  isRead  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum notificationType {
+  Appointment_Reminder
+  Appointment_Created
+  test
+}
+
+model software_version {
+  id String @id @default(uuid())
+
+  version     String
+  releaseDate DateTime
+  title       String?
+  description Json?
+
+  isNewest Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([releaseDate])
+}
+
+//--------------------------------------------------------
+//------------------------ALL settings--------------------
+//--------------------------------------------------------
+model partners_settings {
+  id String @id @default(uuid())
+
+  partnerId String @unique
+  partner   User   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  orthotech Boolean @default(false)
+  opannrit  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@map("partners_settings")
+}
+
+model order_settings {
+  id        Int      @id @default(autoincrement())
+  updatedAt DateTime @updatedAt
+
+  // 1
+  autoCalcPelottePos Boolean @default(true)
+
+  // 2
+  autoSendToProd Boolean @default(false)
+
+  // 3 - attach scans to order
+  attachFootScans Boolean @default(true)
+
+  // 4 - include basic meas. points 10+11
+  showMeasPoints10_11 Boolean @default(false)
+
+  // 5 - actually print the foot scans
+  printFootScans Boolean @default(true)
+
+  // 6 - detailed / extended meas. points 10+11
+  showMeasPoints10_11_Det Boolean @default(false)
+
+  // Optional: multi-company support
+  partnerId String? @unique
+  partner   User?   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([partnerId])
+  @@index([updatedAt])
+  @@map("order_settings")
+}
+
+//--------------------------------------------------------
+//-----------------------settings end---------------------
+//--------------------------------------------------------

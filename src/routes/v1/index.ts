@@ -1,0 +1,71 @@
+
+
+import { FastifyInstance } from "fastify";
+
+import users from "./auth/auth.routes";
+import products from "./products/products.routes";
+import excel from "./excel/excel.routes";
+import questions from "./question/question.routes";
+import partner from "./partners/partners.routes";
+import suggestions from "./suggestions/suggestions.routes";
+import message from "./messages/messages.routes";
+import appointment from "./appointment/appointment.routes";
+import versorgungen from "./versorgungen/versorgungen.routes";
+import employees from "./employees/employees.routes";
+import customers from "./customers/customers.routes";
+import einlagenFinder from "./einlagenFinder/einlagenFinder.routes";
+import exercises from "./exercises/exercises.routes";
+import customerHistory from "./customers-history/customersHistory.routes";
+
+import customerOrders from "./customerOrders/customerOrders.routes";
+import trackOrders from "./customerOrders/track_orders/track_orders.routes";
+import manageOrders from "./customerOrders/manage_orders/manage_orders.routes";
+
+import customerPrice from "./customerPrice/customerPrice.routes";
+import workeshopNote from "./workshopNote/workshopNote.routes";
+import storage from "./storage/storage.routes";
+import bestellubersicht from "./bestellubersicht/Bestellubersicht.routes";
+import custom_shafts from "./custom_shafts/custom_shafts.routes";
+import customer_files from "./customer_files/customer_files.routes";
+import massschuhe_order from "./massschuhe_order/massschuhe_order.routes";
+import customer_settings from "./customer_settings/customer_settings.routes";
+
+async function routesV1(fastify: FastifyInstance) {
+  const moduleRoutes = [
+    { path: "/users", route: users },
+    { path: "/products", route: products },
+    { path: "/excel", route: excel },
+    { path: "/questions", route: questions },
+    { path: "/partner", route: partner },
+    { path: "/suggestions", route: suggestions },
+    { path: "/message", route: message },
+    { path: "/appointment", route: appointment },
+    { path: "/versorgungen", route: versorgungen },
+    { path: "/employees", route: employees },
+    { path: "/customers", route: customers },
+    { path: "/einlagen-finder", route: einlagenFinder },
+    { path: "/exercises", route: exercises },
+    { path: "/customers-history", route: customerHistory },
+
+    //insole
+    { path: "/customer-orders", route: customerOrders },
+    { path: "/customer-orders/track", route: trackOrders },
+    { path: "/customer-orders/manage", route: manageOrders },
+
+    { path: "/customer-price", route: customerPrice },
+    { path: "/workshop-note", route: workeshopNote },
+    { path: "/store", route: storage },
+    { path: "/bestellubersicht", route: bestellubersicht },
+    { path: "/custom_shafts", route: custom_shafts },
+    { path: "/customer-files", route: customer_files },
+    { path: "/massschuhe-order", route: massschuhe_order },
+    { path: "/customer-settings", route: customer_settings },
+  ];
+
+  moduleRoutes.forEach(({ path, route }) => {
+    fastify.register(route, { prefix: path });
+  });
+  
+}
+
+export default routesV1;
